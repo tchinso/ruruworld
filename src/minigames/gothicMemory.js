@@ -26,9 +26,6 @@ const GOTHIC_SEQUENCE_LENGTHS = [
   9,
   9,
   9,
-  10,
-  10,
-  10,
 ];
 const GOTHIC_STEP_SECONDS = 0.33;
 const GOTHIC_BETWEEN_SECONDS = 0.34;
