@@ -80,6 +80,14 @@ button {
   letter-spacing: 0;
 }
 
+.floor-chip strong.stage-name {
+  max-width: 160px;
+  font-size: 23px;
+  line-height: 1.08;
+  text-align: right;
+  white-space: normal;
+}
+
 .stat-row {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
@@ -206,6 +214,93 @@ button {
   background: rgba(110, 231, 183, 0.16);
 }
 
+.rhythm-hud {
+  left: 50%;
+  bottom: 18px;
+  width: min(540px, calc(100vw - 420px));
+  min-width: 360px;
+  padding: 12px;
+  border-radius: 8px;
+  transform: translateX(-50%);
+}
+
+.rhythm-hud.hidden {
+  display: none;
+}
+
+.rhythm-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.rhythm-heading span,
+.rhythm-stats span {
+  color: rgba(247, 250, 252, 0.62);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.rhythm-heading strong {
+  color: #facc15;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.life-meter {
+  width: 100%;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.life-meter span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #34d399, #facc15);
+  transition:
+    width 140ms ease,
+    background 140ms ease;
+}
+
+.life-meter span.danger {
+  background: linear-gradient(90deg, #fb7185, #facc15);
+}
+
+.rhythm-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rhythm-stats div {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.rhythm-stats strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f7fafc;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
 .message {
   position: fixed;
   z-index: 6;
@@ -230,6 +325,71 @@ button {
   opacity: 0;
   pointer-events: none;
   transform: translate(-50%, -8px);
+}
+
+.popup {
+  position: fixed;
+  z-index: 12;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(3, 7, 12, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.popup.hidden {
+  display: none;
+}
+
+.popup-panel {
+  width: min(430px, 100%);
+  border: 1px solid rgba(110, 231, 183, 0.36);
+  border-radius: 8px;
+  padding: 20px;
+  background: rgba(8, 13, 19, 0.94);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.44);
+}
+
+.popup-panel strong {
+  display: block;
+  color: #6ee7b7;
+  font-size: 24px;
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+.popup-panel p {
+  margin: 12px 0 0;
+  color: rgba(247, 250, 252, 0.78);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.popup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.popup-actions button {
+  min-width: 92px;
+  min-height: 38px;
+  border: 1px solid rgba(110, 231, 183, 0.44);
+  border-radius: 6px;
+  color: #07131a;
+  background: #6ee7b7;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.popup-actions button:hover {
+  background: #99f6e4;
+}
+
+.popup-actions button.hidden {
+  display: none;
 }
 
 .loading {
@@ -290,6 +450,20 @@ button {
     bottom: 12px;
     right: auto;
     width: calc(100vw - 168px);
+  }
+
+  .rhythm-hud {
+    left: 12px;
+    right: 12px;
+    top: 154px;
+    bottom: auto;
+    width: auto;
+    min-width: 0;
+    transform: none;
+  }
+
+  .rhythm-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .controls {

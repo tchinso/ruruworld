@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import gunpowderChart from "../assets/rhythm/gunpowder-chart.json";
 
 const MODEL_DEFS = [
   {
@@ -118,9 +119,34 @@ const FOLLOW_DELAY = 15;
 const MAX_TRAIL = 720;
 const START_POSITION = new THREE.Vector3(0, 0, ROOM_HALF - 4);
 const EXIT_POSITION = new THREE.Vector3(0, 0, -ROOM_HALF + 0.35);
+const ROOFTOP_FLOOR = 13;
+const STANDARD_TOP_FLOOR = 12;
+const ROOFTOP_STAGE_NAME = "옥상 스테이지";
+const ROOFTOP_AUDIO_URL = new URL("../assets/rhythm/gunpowder-audio.mp3", import.meta.url).href;
+const ROOFTOP_CHART = gunpowderChart.difficulties.normal;
+const RHYTHM_LANE_KEYS = ["Z", "K", "N", "M"];
+const RHYTHM_LANE_CODES = new Map([
+  ["KeyZ", 0],
+  ["KeyK", 1],
+  ["KeyN", 2],
+  ["KeyM", 3],
+]);
+const RHYTHM_LANE_X = [-3.6, -1.2, 1.2, 3.6];
+const RHYTHM_RECEPTOR_Z = START_POSITION.z - 3.2;
+const RHYTHM_SPAWN_Z = EXIT_POSITION.z + 3.2;
+const RHYTHM_APPROACH = 2.2;
+const RHYTHM_MISS_WINDOW = 0.18;
+const RHYTHM_MAX_LIFE = 100;
+const RHYTHM_JUDGES = {
+  Perfect: { window: 0.045, life: 8 },
+  Great: { window: 0.09, life: 2 },
+  Good: { window: 0.135, life: 0 },
+  Bad: { window: RHYTHM_MISS_WINDOW, life: -4 },
+  Miss: { window: Infinity, life: -6 },
+};
 
 const FLOOR_THEMES = [
-  { floor: 13, floorColor: "#203341", grid: "#38bdf8", wall: "#142431" },
+  { floor: 13, label: ROOFTOP_STAGE_NAME, floorColor: "#203341", grid: "#38bdf8", wall: "#142431" },
   { floor: 12, floorColor: "#26343b", grid: "#6ee7b7", wall: "#182922" },
   { floor: 11, floorColor: "#322f3f", grid: "#c084fc", wall: "#211c2f" },
   { floor: 10, floorColor: "#383128", grid: "#fbbf24", wall: "#2b2218" },
@@ -148,6 +174,19 @@ const dom = {
   message: document.querySelector("#message"),
   skipButton: document.querySelector("#skipButton"),
   resetButton: document.querySelector("#resetButton"),
+  rhythmHud: document.querySelector("#rhythmHud"),
+  rhythmSong: document.querySelector("#rhythmSong"),
+  rhythmStatus: document.querySelector("#rhythmStatus"),
+  rhythmLifeFill: document.querySelector("#rhythmLifeFill"),
+  rhythmLifeText: document.querySelector("#rhythmLifeText"),
+  rhythmJudge: document.querySelector("#rhythmJudge"),
+  rhythmCombo: document.querySelector("#rhythmCombo"),
+  rhythmKeys: document.querySelector("#rhythmKeys"),
+  popup: document.querySelector("#popup"),
+  popupTitle: document.querySelector("#popupTitle"),
+  popupBody: document.querySelector("#popupBody"),
+  popupPrimary: document.querySelector("#popupPrimary"),
+  popupSecondary: document.querySelector("#popupSecondary"),
 };
 
 const renderer = new THREE.WebGLRenderer({
@@ -199,6 +238,10 @@ scene.add(fillLight);
 
 const room = createRoom();
 scene.add(room.group);
+const rhythmStage = createRhythmStage();
+scene.add(rhythmStage.group);
+const audience = createAudience();
+scene.add(audience.group);
 
 const loader = new GLTFLoader();
 const loadedScenes = new Map();
@@ -212,6 +255,8 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const clock = new THREE.Clock();
+const rhythmAudio = new Audio(ROOFTOP_AUDIO_URL);
+rhythmAudio.preload = "auto";
 
 let player = null;
 let currentRecruit = null;
@@ -220,6 +265,20 @@ let exitOpen = false;
 let escapeComplete = false;
 let loadedCount = 0;
 let messageTimeout = null;
+let popupPrimaryAction = null;
+let popupSecondaryAction = null;
+
+const rhythmState = {
+  status: "ready",
+  notes: [],
+  life: RHYTHM_MAX_LIFE,
+  combo: 0,
+  maxCombo: 0,
+  judged: 0,
+  lastJudge: "Ready",
+  keyFlash: [0, 0, 0, 0],
+  counts: { Perfect: 0, Great: 0, Good: 0, Bad: 0, Miss: 0 },
+};
 
 init().catch(handleFatalError);
 
@@ -236,10 +295,12 @@ async function init() {
 
   resetTrail();
 
-  spawnRecruit();
+  resetRooftopPerformance();
+  applyFloorTheme();
   updateHud();
   dom.loading.classList.add("hidden");
-  showMessage("13F");
+  showRooftopIntroPopup();
+  showMessage(ROOFTOP_STAGE_NAME);
 
   renderer.setAnimationLoop(tick);
 }
@@ -256,10 +317,18 @@ function bindEvents() {
   window.addEventListener("resize", resize);
 
   window.addEventListener("keydown", (event) => {
+    if (isPopupOpen()) {
+      return;
+    }
+
+    if (handleRooftopKeyDown(event)) {
+      return;
+    }
+
     const key = event.key.toLowerCase();
     keys.add(key);
 
-    if (key === "n") {
+    if (key === "n" && currentFloor !== ROOFTOP_FLOOR) {
       advanceDebugStep();
     }
 
@@ -275,6 +344,19 @@ function bindEvents() {
   dom.canvas.addEventListener("pointerdown", setPointerTarget);
   dom.skipButton.addEventListener("click", advanceDebugStep);
   dom.resetButton.addEventListener("click", resetPrototype);
+  dom.popupPrimary.addEventListener("click", () => {
+    const action = popupPrimaryAction;
+    hidePopup();
+    action?.();
+  });
+  dom.popupSecondary.addEventListener("click", () => {
+    const action = popupSecondaryAction;
+    hidePopup();
+    action?.();
+  });
+  rhythmAudio.addEventListener("ended", () => {
+    completeRooftopPerformance();
+  });
 }
 
 async function loadModels() {
@@ -478,10 +560,10 @@ function createRoom() {
 
   group.add(exitGroup);
 
-  const floorSign = createTextSprite("13F", "#6ee7b7", 1.0);
+  const floorSign = createTextSprite(ROOFTOP_STAGE_NAME, "#6ee7b7", 1.0);
   floorSign.name = "floor-sign";
   floorSign.position.set(0, 2.05, -WALL_OFFSET + 0.29);
-  floorSign.scale.set(2.2, 0.7, 1);
+  floorSign.scale.set(3.25, 0.78, 1);
   group.add(floorSign);
 
   return {
@@ -500,6 +582,10 @@ function createRoom() {
 }
 
 function spawnRecruit() {
+  if (currentFloor === ROOFTOP_FLOOR) {
+    return;
+  }
+
   if (followers.length >= COMPANION_COUNT) {
     openExit();
     return;
@@ -605,15 +691,193 @@ function roundRect(context, x, y, width, height, radius) {
   context.closePath();
 }
 
+function createRhythmStage() {
+  const group = new THREE.Group();
+  group.name = "rooftop-rhythm-stage";
+
+  const laneLength = RHYTHM_RECEPTOR_Z - RHYTHM_SPAWN_Z;
+  const laneCenterZ = (RHYTHM_RECEPTOR_Z + RHYTHM_SPAWN_Z) / 2;
+  const baseMaterial = new THREE.MeshStandardMaterial({
+    color: "#07131a",
+    roughness: 0.68,
+    metalness: 0.08,
+    transparent: true,
+    opacity: 0.78,
+    emissive: "#0f766e",
+    emissiveIntensity: 0.08,
+  });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(11.2, 0.035, laneLength + 4), baseMaterial);
+  base.position.set(0, 0.045, laneCenterZ);
+  base.receiveShadow = true;
+  group.add(base);
+
+  const laneColors = ["#2dd4bf", "#facc15", "#f472b6", "#60a5fa"];
+  const laneMaterials = laneColors.map((color) => new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.52,
+    metalness: 0.18,
+    transparent: true,
+    opacity: 0.18,
+    emissive: color,
+    emissiveIntensity: 0.02,
+  }));
+  const laneStrips = RHYTHM_LANE_X.map((x, index) => {
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.04, laneLength), laneMaterials[index]);
+    strip.position.set(x, 0.075, laneCenterZ);
+    strip.receiveShadow = true;
+    group.add(strip);
+    return strip;
+  });
+
+  const dividerMaterial = new THREE.MeshBasicMaterial({
+    color: "#d6f7ff",
+    transparent: true,
+    opacity: 0.28,
+  });
+  [-4.8, -2.4, 0, 2.4, 4.8].forEach((x) => {
+    const divider = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, laneLength + 0.8), dividerMaterial);
+    divider.position.set(x, 0.1, laneCenterZ);
+    group.add(divider);
+  });
+
+  const receptorMaterial = new THREE.MeshBasicMaterial({
+    color: "#facc15",
+    transparent: true,
+    opacity: 0.92,
+  });
+  const receptor = new THREE.Mesh(new THREE.BoxGeometry(10.2, 0.1, 0.24), receptorMaterial);
+  receptor.position.set(0, 0.16, RHYTHM_RECEPTOR_Z);
+  group.add(receptor);
+
+  const startPadMaterial = new THREE.MeshBasicMaterial({
+    color: "#2dd4bf",
+    transparent: true,
+    opacity: 0.18,
+  });
+  const startPad = new THREE.Mesh(new THREE.BoxGeometry(10.2, 0.05, 2.0), startPadMaterial);
+  startPad.position.set(0, 0.13, RHYTHM_RECEPTOR_Z + 1.25);
+  group.add(startPad);
+
+  const noteGeometry = new THREE.BoxGeometry(1.45, 0.12, 0.72);
+  const noteMaterials = laneColors.map((color) => new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.32,
+    metalness: 0.18,
+    emissive: color,
+    emissiveIntensity: 0.35,
+  }));
+  const noteMeshes = ROOFTOP_CHART.notes.map((note) => {
+    const lane = THREE.MathUtils.clamp(Number(note.lane) || 0, 0, RHYTHM_LANE_X.length - 1);
+    const mesh = new THREE.Mesh(noteGeometry, noteMaterials[lane]);
+    mesh.position.set(RHYTHM_LANE_X[lane], 0.24, RHYTHM_SPAWN_Z);
+    mesh.visible = false;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  });
+
+  const keyLabels = RHYTHM_LANE_KEYS.map((key, index) => {
+    const label = createTextSprite(key, laneColors[index], 0.92);
+    label.position.set(RHYTHM_LANE_X[index], 0.72, RHYTHM_RECEPTOR_Z + 2.35);
+    label.scale.set(0.8, 0.25, 1);
+    group.add(label);
+    return label;
+  });
+
+  group.visible = false;
+  return {
+    group,
+    base,
+    laneStrips,
+    laneMaterials,
+    receptor,
+    receptorMaterial,
+    startPad,
+    startPadMaterial,
+    noteMeshes,
+    keyLabels,
+  };
+}
+
+function createAudience() {
+  const group = new THREE.Group();
+  group.name = "rooftop-audience";
+  const members = [];
+  const bodyGeometry = new THREE.BoxGeometry(0.5, 0.85, 0.34);
+  const armGeometry = new THREE.BoxGeometry(0.16, 0.7, 0.16);
+  const headGeometry = new THREE.SphereGeometry(0.24, 10, 8);
+  const shirtMaterials = ["#22d3ee", "#f472b6", "#facc15", "#a78bfa", "#34d399"].map(
+    (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.74, metalness: 0.02 }),
+  );
+  const skinMaterials = ["#ffd7ba", "#f5c6a5", "#e8b28f"].map(
+    (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0 }),
+  );
+
+  [-1, 1].forEach((side) => {
+    for (let row = 0; row < 3; row += 1) {
+      for (let column = 0; column < 16; column += 1) {
+        const member = new THREE.Group();
+        const shirtMaterial = shirtMaterials[(column + row * 2 + (side > 0 ? 1 : 0)) % shirtMaterials.length];
+        const skinMaterial = skinMaterials[(column + row) % skinMaterials.length];
+        const x = side * (13.5 + row * 3.15 + (column % 2) * 0.45);
+        const z = -34 + column * 4.35 + row * 0.65;
+        member.position.set(x, 0, z);
+        member.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+
+        const body = new THREE.Mesh(bodyGeometry, shirtMaterial);
+        body.position.y = 0.62;
+        body.castShadow = true;
+        body.receiveShadow = true;
+        member.add(body);
+
+        const head = new THREE.Mesh(headGeometry, skinMaterial);
+        head.position.y = 1.24;
+        head.castShadow = true;
+        member.add(head);
+
+        const leftArmPivot = new THREE.Group();
+        leftArmPivot.position.set(-0.36, 0.98, 0);
+        const leftArm = new THREE.Mesh(armGeometry, shirtMaterial);
+        leftArm.position.y = -0.31;
+        leftArmPivot.add(leftArm);
+        member.add(leftArmPivot);
+
+        const rightArmPivot = new THREE.Group();
+        rightArmPivot.position.set(0.36, 0.98, 0);
+        const rightArm = new THREE.Mesh(armGeometry, shirtMaterial);
+        rightArm.position.y = -0.31;
+        rightArmPivot.add(rightArm);
+        member.add(rightArmPivot);
+
+        group.add(member);
+        members.push({
+          group: member,
+          leftArmPivot,
+          rightArmPivot,
+          phase: column * 0.47 + row * 0.9 + (side > 0 ? 0.25 : 0),
+        });
+      }
+    }
+  });
+
+  group.visible = false;
+  return { group, members };
+}
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.033);
   const elapsed = clock.elapsedTime;
+
+  updateRooftopStage(dt, elapsed);
 
   if (player && !escapeComplete) {
     updatePlayer(dt);
     updateTrail();
     updateFollowers(dt);
-    checkRecruitCollision();
+    if (currentFloor !== ROOFTOP_FLOOR) {
+      checkRecruitCollision();
+    }
     checkExitCollision();
   }
 
@@ -626,6 +890,10 @@ function tick() {
 }
 
 function updatePlayer(dt) {
+  if (isPopupOpen() || isRooftopPerformancePlaying()) {
+    return;
+  }
+
   const direction = new THREE.Vector3();
   const up = keys.has("w") || keys.has("arrowup");
   const down = keys.has("s") || keys.has("arrowdown");
@@ -804,7 +1072,11 @@ function openExit() {
 
   exitOpen = true;
   updateHud();
-  showMessage(currentFloor === 1 ? "출구 개방" : "문 열림");
+  if (currentFloor === ROOFTOP_FLOOR) {
+    showMessage("관객 만족! 옥상문이 열렸습니다.", 2400);
+  } else {
+    showMessage(currentFloor === 1 ? "출구 개방" : "문 열림");
+  }
 }
 
 function checkExitCollision() {
@@ -822,6 +1094,11 @@ function checkExitCollision() {
 }
 
 function advanceDebugStep() {
+  if (currentFloor === ROOFTOP_FLOOR && !isRooftopPerformanceCleared()) {
+    showMessage("음악이 끝날 때까지 버텨야 관객이 만족합니다.", 1800);
+    return;
+  }
+
   if (currentRecruit) {
     recruitCurrent();
     return;
@@ -851,7 +1128,7 @@ function completeDoorTransition() {
   applyFloorTheme();
   placePartyAtStart();
   updateHud();
-  showMessage(`${currentFloor}F`);
+  showMessage(getFloorDisplayName(currentFloor));
 
   if (!exitOpen) {
     window.setTimeout(() => {
@@ -868,17 +1145,22 @@ function applyFloorTheme() {
   room.wallMaterial.color.set(theme.wall);
   room.grid.material.color.set(theme.grid);
   room.floorSign.material.map.dispose();
-  const newSign = createTextSprite(`${currentFloor}F`, theme.grid, 1);
+  const newSign = createTextSprite(getFloorDisplayName(currentFloor), theme.grid, 1);
   room.floorSign.material.map = newSign.material.map;
   room.floorSign.material.needsUpdate = true;
+  room.floorSign.scale.set(currentFloor === ROOFTOP_FLOOR ? 3.25 : 2.2, currentFloor === ROOFTOP_FLOOR ? 0.78 : 0.7, 1);
   newSign.material.dispose();
+  updateRooftopVisibility();
 }
 
 function updateHud() {
-  dom.floorValue.textContent = `${currentFloor}F`;
+  dom.floorValue.textContent = getFloorDisplayName(currentFloor);
+  dom.floorValue.classList.toggle("stage-name", currentFloor === ROOFTOP_FLOOR);
   dom.friendValue.textContent = `${followers.length} / ${COMPANION_COUNT}`;
   if (escapeComplete) {
     dom.nextValue.textContent = "탈출 완료";
+  } else if (currentFloor === ROOFTOP_FLOOR) {
+    dom.nextValue.textContent = rooftopGoalText();
   } else if (currentRecruit) {
     dom.nextValue.textContent = currentRecruit.def.name;
   } else if (exitOpen && currentFloor === 1) {
@@ -909,7 +1191,7 @@ function renderRoster() {
 
     const floor = document.createElement("span");
     floor.className = "roster-floor";
-    floor.textContent = `${13 - index}F`;
+    floor.textContent = `${STANDARD_TOP_FLOOR - index}F`;
     row.append(floor);
 
     dom.rosterList.append(row);
@@ -923,6 +1205,429 @@ function showMessage(text, duration = 1250) {
   messageTimeout = window.setTimeout(() => {
     dom.message.classList.add("hidden");
   }, duration);
+}
+
+function showPopup(title, body, primaryText = "확인", primaryAction = null, secondaryText = "", secondaryAction = null) {
+  dom.popupTitle.textContent = title;
+  dom.popupBody.textContent = body;
+  dom.popupPrimary.textContent = primaryText;
+  popupPrimaryAction = primaryAction;
+  popupSecondaryAction = secondaryAction;
+  dom.popupSecondary.textContent = secondaryText;
+  dom.popupSecondary.classList.toggle("hidden", !secondaryText);
+  dom.popup.classList.remove("hidden");
+}
+
+function hidePopup() {
+  dom.popup.classList.add("hidden");
+  popupPrimaryAction = null;
+  popupSecondaryAction = null;
+}
+
+function isPopupOpen() {
+  return !dom.popup.classList.contains("hidden");
+}
+
+function showRooftopIntroPopup() {
+  showPopup(
+    ROOFTOP_STAGE_NAME,
+    "미쿠는 공연으로 관객들을 만족시켜야 이 층을 탈출할 수 있습니다. 판정 라인 아래에서 Z를 누르면 공연이 시작됩니다.",
+    "확인",
+  );
+}
+
+function getFloorDisplayName(floor) {
+  if (floor === ROOFTOP_FLOOR) {
+    return ROOFTOP_STAGE_NAME;
+  }
+  return `${floor}F`;
+}
+
+function rooftopGoalText() {
+  if (escapeComplete) {
+    return "탈출 완료";
+  }
+  if (exitOpen || rhythmState.status === "cleared") {
+    return "문으로 이동";
+  }
+  if (rhythmState.status === "playing") {
+    return "공연 중";
+  }
+  if (rhythmState.status === "failed") {
+    return "공연 실패";
+  }
+  return "공연 준비";
+}
+
+function updateRooftopVisibility() {
+  const visible = currentFloor === ROOFTOP_FLOOR && !escapeComplete;
+  rhythmStage.group.visible = visible;
+  audience.group.visible = visible;
+  dom.rhythmHud.classList.toggle("hidden", !visible);
+}
+
+function makeRooftopNotes() {
+  return ROOFTOP_CHART.notes
+    .map((note, index) => ({
+      index,
+      time: Number(note.time),
+      lane: THREE.MathUtils.clamp(Number(note.lane) || 0, 0, RHYTHM_LANE_X.length - 1),
+      type: note.type || "tap",
+      hit: false,
+      missed: false,
+    }))
+    .sort((a, b) => a.time - b.time);
+}
+
+function resetRooftopStats() {
+  rhythmState.notes = makeRooftopNotes();
+  rhythmState.life = RHYTHM_MAX_LIFE;
+  rhythmState.combo = 0;
+  rhythmState.maxCombo = 0;
+  rhythmState.judged = 0;
+  rhythmState.lastJudge = "Ready";
+  rhythmState.keyFlash = [0, 0, 0, 0];
+  rhythmState.counts = { Perfect: 0, Great: 0, Good: 0, Bad: 0, Miss: 0 };
+  hideRooftopNotes();
+}
+
+function resetRooftopPerformance(options = {}) {
+  rhythmAudio.pause();
+  try {
+    rhythmAudio.currentTime = 0;
+  } catch {
+    // Some browsers reject currentTime changes before metadata is ready.
+  }
+  rhythmState.status = "ready";
+  resetRooftopStats();
+  if (currentFloor === ROOFTOP_FLOOR) {
+    exitOpen = false;
+    currentRecruit = null;
+  }
+  if (options.placePlayer && player) {
+    player.group.position.copy(START_POSITION);
+    player.group.rotation.y = Math.PI;
+    pointerTargetActive.value = false;
+    resetTrail();
+  }
+  updateRooftopVisibility();
+  updateRhythmHud();
+  updateHud();
+}
+
+function isRooftopPerformancePlaying() {
+  return currentFloor === ROOFTOP_FLOOR && rhythmState.status === "playing";
+}
+
+function isRooftopPerformanceCleared() {
+  return rhythmState.status === "cleared";
+}
+
+function isPlayerAtRooftopStart() {
+  if (!player) {
+    return false;
+  }
+  const position = player.group.position;
+  return Math.abs(position.x) < 5.4
+    && position.z >= RHYTHM_RECEPTOR_Z - 0.35
+    && position.z <= RHYTHM_RECEPTOR_Z + 5.6;
+}
+
+function getRooftopLaneFromEvent(event) {
+  const laneFromCode = RHYTHM_LANE_CODES.get(event.code);
+  if (laneFromCode !== undefined) {
+    return laneFromCode;
+  }
+  return RHYTHM_LANE_KEYS.indexOf(event.key.toUpperCase());
+}
+
+function handleRooftopKeyDown(event) {
+  if (currentFloor !== ROOFTOP_FLOOR) {
+    return false;
+  }
+
+  const lane = getRooftopLaneFromEvent(event);
+  if (lane < 0) {
+    return false;
+  }
+
+  event.preventDefault();
+  if (event.repeat) {
+    return true;
+  }
+
+  if (rhythmState.status === "playing") {
+    handleRooftopHit(lane);
+    return true;
+  }
+
+  if (rhythmState.status === "ready" && lane === 0) {
+    if (isPlayerAtRooftopStart()) {
+      startRooftopPerformance();
+    } else {
+      showMessage("판정 라인 아래로 이동한 뒤 Z를 눌러 주세요.", 1800);
+    }
+    return true;
+  }
+
+  return true;
+}
+
+async function startRooftopPerformance() {
+  if (rhythmState.status !== "ready" || !player) {
+    return;
+  }
+
+  resetRooftopStats();
+  exitOpen = false;
+  pointerTargetActive.value = false;
+  player.group.position.set(0, 0, RHYTHM_RECEPTOR_Z + 1.55);
+  player.group.rotation.y = Math.PI;
+  player.previousPosition.copy(player.group.position);
+  resetTrail();
+
+  try {
+    rhythmAudio.currentTime = 0;
+  } catch {
+    // Metadata may still be loading; playback will start from the beginning.
+  }
+
+  try {
+    await rhythmAudio.play();
+    rhythmState.status = "playing";
+    updateHud();
+    updateRhythmHud();
+    showMessage("공연 시작", 900);
+  } catch (error) {
+    console.warn("Audio playback was blocked.", error);
+    rhythmState.status = "ready";
+    updateHud();
+    updateRhythmHud();
+    showPopup("오디오 재생 확인", "브라우저가 음악 재생을 막았습니다. 화면을 클릭한 뒤 Z를 다시 눌러 주세요.", "확인");
+  }
+}
+
+function currentRooftopSongTime() {
+  return rhythmAudio.currentTime + (Number(gunpowderChart.offset) || 0);
+}
+
+function judgeRooftopDelta(deltaAbs) {
+  if (deltaAbs <= RHYTHM_JUDGES.Perfect.window) return "Perfect";
+  if (deltaAbs <= RHYTHM_JUDGES.Great.window) return "Great";
+  if (deltaAbs <= RHYTHM_JUDGES.Good.window) return "Good";
+  if (deltaAbs <= RHYTHM_JUDGES.Bad.window) return "Bad";
+  return null;
+}
+
+function handleRooftopHit(lane) {
+  rhythmState.keyFlash[lane] = 1;
+  const now = currentRooftopSongTime();
+  let best = null;
+  let bestDelta = Infinity;
+
+  for (const note of rhythmState.notes) {
+    if (note.hit || note.missed || note.lane !== lane) {
+      continue;
+    }
+    const delta = Math.abs(note.time - now);
+    if (delta < bestDelta) {
+      best = note;
+      bestDelta = delta;
+    }
+    if (note.time - now > RHYTHM_MISS_WINDOW) {
+      break;
+    }
+  }
+
+  const judge = best ? judgeRooftopDelta(bestDelta) : null;
+  if (!best || !judge) {
+    applyRooftopJudge("Bad");
+    return;
+  }
+
+  applyRooftopJudge(judge, best, Math.round((now - best.time) * 1000));
+}
+
+function applyRooftopJudge(judge, note = null, deltaMs = null) {
+  if (note) {
+    note.hit = true;
+    rhythmStage.noteMeshes[note.index].visible = false;
+  }
+
+  const comboContinues = judge === "Perfect" || judge === "Great";
+  if (comboContinues) {
+    rhythmState.combo += 1;
+    rhythmState.maxCombo = Math.max(rhythmState.maxCombo, rhythmState.combo);
+  } else {
+    rhythmState.combo = 0;
+  }
+
+  rhythmState.life = THREE.MathUtils.clamp(
+    rhythmState.life + RHYTHM_JUDGES[judge].life,
+    0,
+    RHYTHM_MAX_LIFE,
+  );
+  rhythmState.judged += 1;
+  rhythmState.counts[judge] += 1;
+  rhythmState.lastJudge = deltaMs === null ? judge : `${judge} ${deltaMs >= 0 ? "+" : ""}${deltaMs}ms`;
+
+  if (rhythmState.life <= 0) {
+    failRooftopPerformance();
+    return;
+  }
+
+  updateRhythmHud();
+}
+
+function markRooftopMisses() {
+  if (!isRooftopPerformancePlaying()) {
+    return;
+  }
+
+  const now = currentRooftopSongTime();
+  for (const note of rhythmState.notes) {
+    if (note.hit || note.missed) {
+      continue;
+    }
+    if (now - note.time > RHYTHM_MISS_WINDOW) {
+      note.missed = true;
+      rhythmStage.noteMeshes[note.index].visible = false;
+      applyRooftopJudge("Miss");
+      if (rhythmState.status !== "playing") {
+        return;
+      }
+    } else if (note.time - now > RHYTHM_APPROACH + RHYTHM_MISS_WINDOW) {
+      break;
+    }
+  }
+}
+
+function failRooftopPerformance() {
+  if (rhythmState.status === "failed" || rhythmState.status === "cleared") {
+    return;
+  }
+
+  rhythmState.status = "failed";
+  rhythmAudio.pause();
+  hideRooftopNotes();
+  updateHud();
+  updateRhythmHud();
+  showPopup(
+    "공연 실패",
+    "관객들이 만족하지 않아서 옥상을 탈출하지 못했습니다.",
+    "다시 준비하기",
+    () => {
+      resetRooftopPerformance({ placePlayer: true });
+      showMessage("공연 준비", 1000);
+    },
+  );
+}
+
+function completeRooftopPerformance() {
+  if (currentFloor !== ROOFTOP_FLOOR || rhythmState.status !== "playing") {
+    return;
+  }
+
+  if (rhythmState.life <= 0) {
+    failRooftopPerformance();
+    return;
+  }
+
+  rhythmState.status = "cleared";
+  rhythmState.lastJudge = `Clear Max ${rhythmState.maxCombo}`;
+  hideRooftopNotes();
+  openExit();
+  updateHud();
+  updateRhythmHud();
+}
+
+function updateRooftopStage(dt, elapsed) {
+  updateRooftopVisibility();
+  if (currentFloor !== ROOFTOP_FLOOR || escapeComplete) {
+    return;
+  }
+
+  animateAudience(elapsed);
+  updateRooftopStageMaterials(dt, elapsed);
+
+  if (rhythmState.status === "playing") {
+    markRooftopMisses();
+    updateRooftopNotes();
+  } else {
+    hideRooftopNotes();
+  }
+
+  updateRhythmHud();
+}
+
+function animateAudience(elapsed) {
+  const energy = rhythmState.status === "playing" ? 1 : 0.55;
+  audience.members.forEach((member) => {
+    const wave = Math.sin(elapsed * (3.6 + energy * 2.2) + member.phase) * (0.42 + energy * 0.18);
+    member.leftArmPivot.rotation.z = -0.45 + wave;
+    member.rightArmPivot.rotation.z = 0.45 - wave;
+    member.group.position.y = Math.max(0, Math.sin(elapsed * 2.1 + member.phase) * 0.035 * energy);
+  });
+}
+
+function updateRooftopStageMaterials(dt, elapsed) {
+  const atStart = rhythmState.status === "ready" && isPlayerAtRooftopStart();
+  rhythmStage.startPadMaterial.opacity = atStart
+    ? 0.34 + Math.sin(elapsed * 6) * 0.08
+    : 0.16 + Math.sin(elapsed * 2.4) * 0.03;
+  rhythmStage.receptorMaterial.opacity = rhythmState.status === "playing"
+    ? 0.78 + Math.sin(elapsed * 12) * 0.16
+    : 0.72;
+  rhythmStage.laneMaterials.forEach((material, index) => {
+    const flash = rhythmState.keyFlash[index];
+    material.opacity = 0.18 + flash * 0.22;
+    material.emissiveIntensity = 0.02 + flash * 0.3;
+    rhythmState.keyFlash[index] = Math.max(0, flash - dt * 5.6);
+  });
+}
+
+function updateRooftopNotes() {
+  const now = currentRooftopSongTime();
+  const travel = RHYTHM_RECEPTOR_Z - RHYTHM_SPAWN_Z;
+  for (const note of rhythmState.notes) {
+    const mesh = rhythmStage.noteMeshes[note.index];
+    if (note.hit || note.missed) {
+      mesh.visible = false;
+      continue;
+    }
+
+    const delta = note.time - now;
+    if (delta < -RHYTHM_MISS_WINDOW || delta > RHYTHM_APPROACH + 0.18) {
+      mesh.visible = false;
+      if (delta > RHYTHM_APPROACH + 0.18) {
+        break;
+      }
+      continue;
+    }
+
+    const progress = 1 - THREE.MathUtils.clamp(delta / RHYTHM_APPROACH, 0, 1);
+    mesh.position.x = RHYTHM_LANE_X[note.lane];
+    mesh.position.z = RHYTHM_SPAWN_Z + travel * progress;
+    mesh.position.y = 0.24 + Math.sin((1 - progress) * Math.PI) * 0.06;
+    mesh.visible = true;
+  }
+}
+
+function hideRooftopNotes() {
+  rhythmStage.noteMeshes.forEach((mesh) => {
+    mesh.visible = false;
+  });
+}
+
+function updateRhythmHud() {
+  dom.rhythmSong.textContent = `${gunpowderChart.title} · Normal`;
+  dom.rhythmStatus.textContent = rooftopGoalText();
+  dom.rhythmLifeText.textContent = `${Math.ceil(rhythmState.life)} / ${RHYTHM_MAX_LIFE}`;
+  dom.rhythmLifeFill.style.width = `${Math.max(0, rhythmState.life)}%`;
+  dom.rhythmLifeFill.classList.toggle("danger", rhythmState.life <= 24);
+  dom.rhythmJudge.textContent = rhythmState.lastJudge;
+  dom.rhythmCombo.textContent = rhythmState.combo;
+  dom.rhythmKeys.textContent = RHYTHM_LANE_KEYS.join(" ");
 }
 
 function setPointerTarget(event) {
@@ -994,9 +1699,10 @@ function resetPrototype() {
   room.rightDoor.position.x = 0.58;
   applyFloorTheme();
   renderRoster();
-  spawnRecruit();
+  resetRooftopPerformance();
   updateHud();
-  showMessage("13F");
+  showRooftopIntroPopup();
+  showMessage(ROOFTOP_STAGE_NAME);
 }
 
 function disposeActor(actor) {

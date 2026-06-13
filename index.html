@@ -20,21 +20,21 @@
 
       <div class="hud hud-main" aria-live="polite">
         <div class="floor-chip">
-          <span class="label">현재 층</span>
-          <strong id="floorValue">13F</strong>
+          <span class="label">현재 위치</span>
+          <strong id="floorValue">옥상 스테이지</strong>
         </div>
         <div class="stat-row">
           <span>동료</span>
           <strong id="friendValue">0 / 12</strong>
         </div>
         <div class="stat-row">
-          <span>다음</span>
+          <span>목표</span>
           <strong id="nextValue">-</strong>
         </div>
       </div>
 
       <div class="hud roster">
-        <div class="roster-title">합류</div>
+        <div class="roster-title">동료</div>
         <div id="rosterList" class="roster-list"></div>
       </div>
 
@@ -44,11 +44,51 @@
       </div>
 
       <div class="hud controls">
-        <button id="skipButton" type="button" aria-label="다음 테스트 단계">⏭</button>
-        <button id="resetButton" type="button" aria-label="처음부터 다시 시작">↻</button>
+        <button id="skipButton" type="button" aria-label="다음 단계">N</button>
+        <button id="resetButton" type="button" aria-label="처음부터 다시 시작">R</button>
+      </div>
+
+      <div id="rhythmHud" class="hud rhythm-hud hidden" aria-live="polite">
+        <div class="rhythm-heading">
+          <span id="rhythmSong">ガンパウダー · Normal</span>
+          <strong id="rhythmStatus">공연 준비</strong>
+        </div>
+        <div class="life-meter">
+          <span id="rhythmLifeFill"></span>
+        </div>
+        <div class="rhythm-stats">
+          <div>
+            <span>Life</span>
+            <strong id="rhythmLifeText">100 / 100</strong>
+          </div>
+          <div>
+            <span>Judge</span>
+            <strong id="rhythmJudge">Ready</strong>
+          </div>
+          <div>
+            <span>Combo</span>
+            <strong id="rhythmCombo">0</strong>
+          </div>
+          <div>
+            <span>Keys</span>
+            <strong id="rhythmKeys">Z K N M</strong>
+          </div>
+        </div>
       </div>
 
       <div id="message" class="message hidden"></div>
+
+      <div id="popup" class="popup hidden" role="dialog" aria-modal="true" aria-labelledby="popupTitle">
+        <div class="popup-panel">
+          <strong id="popupTitle">옥상 스테이지</strong>
+          <p id="popupBody"></p>
+          <div class="popup-actions">
+            <button id="popupPrimary" type="button">확인</button>
+            <button id="popupSecondary" type="button" class="hidden">닫기</button>
+          </div>
+        </div>
+      </div>
+
       <div id="loading" class="loading">
         <strong>모델 불러오는 중</strong>
         <span id="loadingDetail">0 / 13</span>
