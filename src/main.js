@@ -151,7 +151,7 @@ const FANART_MAX_HEALTH = 100;
 const FANART_HEALTH_DRAIN_PER_SECOND = FANART_MAX_HEALTH / 6;
 const FANART_HEAL_AMOUNT = 15;
 const FANART_SPEED_MULTIPLIER = 5;
-const FANART_PICKUP_RADIUS = 1.35;
+const FANART_PICKUP_RADIUS = 2.25;
 const FANART_INITIAL_MEDICINE_COUNT = 8;
 const FANART_ACTIVE_MEDICINE_LIMIT = 9;
 const FANART_SPAWN_INTERVAL = 0.9;
@@ -1031,7 +1031,7 @@ function createFanartMedicine(plusMaterial, ringMaterial) {
   vertical.castShadow = true;
   group.add(vertical);
 
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.035, 10, 72), ringMaterial);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.15, 0.035, 10, 72), ringMaterial);
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 0.08;
   group.add(ring);
