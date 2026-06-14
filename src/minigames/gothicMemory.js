@@ -27,6 +27,7 @@ const GOTHIC_SEQUENCE_LENGTHS = [
 ];
 const GOTHIC_STEP_SECONDS = 0.5;
 const GOTHIC_BETWEEN_SECONDS = 0.34;
+const GOTHIC_MISTAKE_FLASH_SECONDS = 0.45;
 const PLAYER_PAD_Z = 29.4;
 const GOTHIC_PAD_Z = -29.4;
 const TILE_Z = 0;
@@ -60,6 +61,7 @@ export function createGothicMemory({
     showIndex: -1,
     showTimer: 0,
     betweenTimer: 0,
+    mistakeTimer: 0,
     activeTile: -1,
     tileFlash: Array.from({ length: GOTHIC_KEYS.length }, () => 0),
   };
@@ -211,6 +213,9 @@ export function createGothicMemory({
     if (state.status === "between" || state.status === "starting") {
       return "다음 문제";
     }
+    if (state.status === "retrying") {
+      return "다시 도전";
+    }
     if (state.status === "failed") {
       return "처음부터 재도전";
     }
@@ -240,6 +245,7 @@ export function createGothicMemory({
     state.showIndex = -1;
     state.showTimer = 0;
     state.betweenTimer = 0;
+    state.mistakeTimer = 0;
     state.activeTile = -1;
     state.tileFlash.fill(0);
 
@@ -381,7 +387,7 @@ export function createGothicMemory({
 
     const expected = state.sequence[state.inputIndex];
     if (key !== expected) {
-      fail("순서가 달라졌습니다. 처음부터 다시 해요.");
+      retryPreviousRound();
       return;
     }
 
@@ -434,6 +440,11 @@ export function createGothicMemory({
       if (state.betweenTimer <= 0) {
         beginRound();
       }
+    } else if (state.status === "retrying") {
+      state.mistakeTimer -= dt;
+      if (state.mistakeTimer <= 0) {
+        beginRound();
+      }
     }
 
     updateGothicHud();
@@ -447,15 +458,24 @@ export function createGothicMemory({
     const gothicActive = state.status === "presenting";
     const playerActive = state.status === "input";
     const readyPulse = state.status === "ready" || state.status === "failed";
+    const mistakeFlash = state.status === "retrying"
+      ? THREE.MathUtils.clamp(state.mistakeTimer / GOTHIC_MISTAKE_FLASH_SECONDS, 0, 1)
+      : 0;
 
-    stage.gothicPadMaterial.opacity = gothicActive
-      ? 0.5 + Math.sin(elapsed * 9) * 0.08
-      : 0.08;
-    stage.playerPadMaterial.opacity = playerActive
-      ? 0.5 + Math.sin(elapsed * 9) * 0.08
-      : readyPulse
-        ? 0.18 + Math.sin(elapsed * 4.4) * 0.04
+    stage.gothicPadMaterial.color.set(mistakeFlash > 0 ? "#fca5a5" : "#38bdf8");
+    stage.playerPadMaterial.color.set(mistakeFlash > 0 ? "#fca5a5" : "#38bdf8");
+    stage.gothicPadMaterial.opacity = mistakeFlash > 0
+      ? 0.34 + mistakeFlash * 0.26
+      : gothicActive
+        ? 0.5 + Math.sin(elapsed * 9) * 0.08
         : 0.08;
+    stage.playerPadMaterial.opacity = mistakeFlash > 0
+      ? 0.34 + mistakeFlash * 0.26
+      : playerActive
+        ? 0.5 + Math.sin(elapsed * 9) * 0.08
+        : readyPulse
+          ? 0.18 + Math.sin(elapsed * 4.4) * 0.04
+          : 0.08;
     stage.startLabel.visible = readyPulse;
 
     stage.tiles.forEach((tile, index) => {
@@ -525,6 +545,25 @@ export function createGothicMemory({
         showMessage("Z로 다시 시작", 1200);
       },
     );
+  }
+
+  function retryPreviousRound() {
+    if (state.status !== "input") {
+      return;
+    }
+
+    state.roundIndex = Math.max(0, state.roundIndex - 3);
+    state.status = "retrying";
+    state.sequence = [];
+    state.inputIndex = 0;
+    state.showIndex = -1;
+    state.showTimer = 0;
+    state.betweenTimer = 0;
+    state.mistakeTimer = GOTHIC_MISTAKE_FLASH_SECONDS;
+    state.activeTile = -1;
+    state.tileFlash.fill(0);
+    updateGothicHud();
+    updateHud();
   }
 
   function complete() {
