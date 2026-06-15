@@ -1,8 +1,6 @@
 import * as THREE from "three";
 
 export const GOTHIC_FLOOR = 2;
-export const GOTHIC_START_POSITION = new THREE.Vector3(0, 0, 31.5);
-export const GOTHIC_RECRUIT_POSITION = new THREE.Vector3(0, 0, -31.5);
 
 const GOTHIC_AUDIO_URL = new URL("../../assets/musics/kuroiyume.mp3", import.meta.url).href;
 const GOTHIC_KEYS = ["Z", "X", "C", "V", "B", "N", "M"];
@@ -28,10 +26,19 @@ const GOTHIC_SEQUENCE_LENGTHS = [
 const GOTHIC_STEP_SECONDS = 0.41;
 const GOTHIC_BETWEEN_SECONDS = 0.34;
 const GOTHIC_MISTAKE_FLASH_SECONDS = 0.45;
-const PLAYER_PAD_Z = 29.4;
-const GOTHIC_PAD_Z = -29.4;
 const TILE_Z = 0;
+const BASE_WIDTH = 45;
+const BASE_DEPTH = 25;
+const CHARACTER_PAD_WIDTH = 26;
+const CHARACTER_PAD_DEPTH = 6.2;
+const CHARACTER_STAND_OFFSET = 2.1;
+const PLAYER_PAD_Z = TILE_Z + BASE_DEPTH / 2 + CHARACTER_PAD_DEPTH / 2;
+const GOTHIC_PAD_Z = TILE_Z - BASE_DEPTH / 2 - CHARACTER_PAD_DEPTH / 2;
+const CENTER_GUIDE_DEPTH = PLAYER_PAD_Z - GOTHIC_PAD_Z - 0.8;
 const TILE_X = [-18, -12, -6, 0, 6, 12, 18];
+
+export const GOTHIC_START_POSITION = new THREE.Vector3(0, 0, PLAYER_PAD_Z + CHARACTER_STAND_OFFSET);
+export const GOTHIC_RECRUIT_POSITION = new THREE.Vector3(0, 0, GOTHIC_PAD_Z - CHARACTER_STAND_OFFSET);
 
 export function createGothicMemory({
   dom,
@@ -85,7 +92,7 @@ export function createGothicMemory({
       emissive: "#1e1b4b",
       emissiveIntensity: 0.1,
     });
-    const base = new THREE.Mesh(new THREE.BoxGeometry(45, 0.04, 25), baseMaterial);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(BASE_WIDTH, 0.04, BASE_DEPTH), baseMaterial);
     base.position.set(0, 0.035, TILE_Z);
     base.receiveShadow = true;
     group.add(base);
@@ -98,11 +105,11 @@ export function createGothicMemory({
     });
     const gothicPadMaterial = sideMaterial.clone();
     const playerPadMaterial = sideMaterial.clone();
-    const gothicPad = new THREE.Mesh(new THREE.BoxGeometry(26, 0.055, 6.2), gothicPadMaterial);
+    const gothicPad = new THREE.Mesh(new THREE.BoxGeometry(CHARACTER_PAD_WIDTH, 0.055, CHARACTER_PAD_DEPTH), gothicPadMaterial);
     gothicPad.position.set(0, 0.08, GOTHIC_PAD_Z);
     group.add(gothicPad);
 
-    const playerPad = new THREE.Mesh(new THREE.BoxGeometry(26, 0.055, 6.2), playerPadMaterial);
+    const playerPad = new THREE.Mesh(new THREE.BoxGeometry(CHARACTER_PAD_WIDTH, 0.055, CHARACTER_PAD_DEPTH), playerPadMaterial);
     playerPad.position.set(0, 0.08, PLAYER_PAD_Z);
     group.add(playerPad);
 
@@ -112,7 +119,7 @@ export function createGothicMemory({
       opacity: 0.2,
       depthWrite: false,
     });
-    const centerGuide = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.075, 58), guideMaterial);
+    const centerGuide = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.075, CENTER_GUIDE_DEPTH), guideMaterial);
     centerGuide.position.set(0, 0.09, 0);
     group.add(centerGuide);
 
